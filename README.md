@@ -13,7 +13,7 @@
 
 ## 安装
 
-> 需要 Node.js 和 npm。
+> 本地运行建议使用 Node.js 22；Docker 镜像固定为 Node.js 22.23.1。
 
 ```bash
 git clone https://github.com/HarukiTakehata/ai-openai.git
@@ -23,7 +23,7 @@ cd ai-openai
 创建 `config.json`（完整示例见下方），然后：
 
 ```bash
-npm install --legacy-peer-deps
+npm ci --legacy-peer-deps
 npm run build
 npm start
 ```
@@ -53,12 +53,17 @@ docker-compose up
   "openaiApiKey": "sk-your-api-key",
   "openaiBaseUrl": "https://api.openai.com/v1",
   "openaiModel": "gpt-4o-mini",
-  "openaiSystemPrompt": "あなたはMisskey看板娘の女の子AI、藍として振る舞ってください...",
+  "openaiSystemPrompt": "你是一个名为「蓝」的 Misskey 看板娘 AI 女孩...",
   "openaiMaxTokens": 2800,
   "openaiTemperature": 0.7,
-  "openaiRandomTalkEnabled": false,
-  "openaiRandomTalkProbability": 0.02,
-  "openaiRandomTalkIntervalMinutes": 720
+  "openaiRequestTimeoutMs": 60000,
+  "openaiFileDownloadTimeoutMs": 10000,
+  "openaiMaxAttachmentBytes": 5242880,
+  "openaiMaxAttachments": 2,
+  "openaiMaxInputChars": 12000,
+  "openaiRateLimitPerMinute": 3,
+  "openaiMaxConcurrentRequests": 2,
+  "openaiDailyRequestLimit": 100
 }
 ```
 
@@ -66,16 +71,26 @@ docker-compose up
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `openaiEnabled` | boolean | — | 启用 OpenAI 对话功能 |
-| `openaiApiKey` | string | — | API 密钥（必填） |
+| `openaiEnabled` | boolean | false | 启用 OpenAI 对话功能；只有显式设为 `true` 才会加载模块 |
+| `openaiApiKey` | string | — | API 密钥（启用模块时必填） |
 | `openaiBaseUrl` | string | `https://api.openai.com/v1` | API 端点。Ollama 用户填 `http://localhost:11434/v1` |
 | `openaiModel` | string | `gpt-4o-mini` | 模型名称 |
-| `openaiSystemPrompt` | string | 内置日语 prompt | 系统提示词 |
+| `openaiSystemPrompt` | string | 内置中文 prompt | 系统提示词 |
 | `openaiMaxTokens` | number | 2800 | 最大输出 token |
 | `openaiTemperature` | number | 0.7 | 生成温度 (0-2) |
-| `openaiRandomTalkEnabled` | boolean | false | 是否启用随机搭话 |
-| `openaiRandomTalkProbability` | number | 0.02 | 搭话概率 |
-| `openaiRandomTalkIntervalMinutes` | number | 720 | 搭话间隔（分钟） |
+| `openaiRequestTimeoutMs` | number | 60000 | 模型 API 请求超时（毫秒） |
+| `openaiFileDownloadTimeoutMs` | number | 10000 | 附件下载超时（毫秒） |
+| `openaiMaxAttachmentBytes` | number | 5242880 | 单个图片附件的最大字节数 |
+| `openaiMaxAttachments` | number | 2 | 单次请求最多处理的图片数 |
+| `openaiMaxInputChars` | number | 12000 | 当前提示词与文本历史的最大总字符数 |
+| `openaiRateLimitPerMinute` | number | 3 | 每用户每分钟最多调用次数 |
+| `openaiMaxConcurrentRequests` | number | 2 | 全局并发模型请求上限 |
+| `openaiDailyRequestLimit` | number | 100 | 按 UTC 日期持久化的全局每日请求上限 |
+| `openaiAllowedUserIds` | string[] | 未设置 | 可选的 Misskey 用户 ID 白名单；未设置时允许所有非 Bot 用户 |
+
+OpenAI 对话只接受独立命令 `openai`、`ai` 或 `chat`，例如 `@ai openai 你好`。普通的占卜、骰子、计时器等消息不会因为 Bot 用户名中含有 `ai` 而被该模块拦截。回复 Bot 的模型答案可继续多轮对话；会话 30 分钟后自动清理。
+
+图片附件仅允许 HTTP(S)，默认最多 2 个、每个 5 MiB。下载会拒绝重定向、私网/保留地址和不受支持的图片 MIME 类型。
 
 ### 使用 Ollama 等本地模型
 
@@ -105,7 +120,7 @@ docker-compose up
 
 ```bash
 npm test                    # 全部测试
-npx jest test/openai.ts     # 仅 OpenAI 模块测试 (18 项)
+npx jest test/openai.ts     # 仅 OpenAI 模块测试 (38 项)
 ```
 
 ## 开源许可证

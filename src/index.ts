@@ -67,7 +67,7 @@ promiseRetry(retry => {
 	// 藍起動
 	new 藍(account, [
 		new CoreModule(),
-		new OpenAIModule(),
+		...(config.openaiEnabled === true ? [new OpenAIModule()] : []),
 		new EmojiModule(),
 		new EmojiReactModule(),
 		new FortuneModule(),

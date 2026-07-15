@@ -88,9 +88,12 @@ PONGを返します。生存確認にどうぞ
 - **引用対応**：Renote 引用した投稿の内容を参照して回答します
 - **モデル切替**：`config.json` の `openaiModel` で任意のモデルを指定可能
 - **ローカルモデル**：Ollama 等のローカルモデルも `openaiBaseUrl` 設定で利用可能
+- **利用制限**：ユーザー単位のレート制限、全体の同時実行数、1日単位の上限を設定できます
+- **添付保護**：画像数・サイズ・タイムアウトを制限し、プライベートアドレスとリダイレクトを拒否します
 
-設定項目：`openaiEnabled` / `openaiApiKey` / `openaiBaseUrl` / `openaiModel` / `openaiSystemPrompt` / `openaiMaxTokens` / `openaiTemperature`
-ランダムトーク：`openaiRandomTalkEnabled=true` で、指定間隔・確率でランダムにタイムライン上のユーザーに話しかけます。
+主要設定：`openaiEnabled` / `openaiApiKey` / `openaiBaseUrl` / `openaiModel` / `openaiSystemPrompt` / `openaiMaxTokens` / `openaiTemperature` / `openaiRateLimitPerMinute` / `openaiMaxConcurrentRequests` / `openaiDailyRequestLimit`
+
+`openaiEnabled` は明示的に `true` にした場合のみ有効です。ランダムトーク機能は現在実装されていません。
 
 ### その他反応するフレーズ (トークのみ)
 * かわいい
