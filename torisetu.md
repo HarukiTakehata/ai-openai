@@ -75,6 +75,23 @@ Misskeyにアカウントを作成して初めて投稿を行うと、藍がネ�
 ### ping
 PONGを返します。生存確認にどうぞ
 
+### OpenAI 对话（🆕 本 fork 新增）
+藍に以下のように話しかけると、OpenAI 兼容 API（GPT / Ollama / vLLM 等）を使って回答してくれます：
+
+```
+@ai openai 部屋の片付けの手順を教えて
+@ai chat 今日の天気は？
+```
+
+- **多轮对话**：藍の返信にリプライすると、会話の文脈を保持したまま続けられます（30分間有効、最大10往復）
+- **画像認識**：画像を添付した投稿にメンションすると、画像の内容について回答します（vision 対応モデルのみ）
+- **引用対応**：Renote 引用した投稿の内容を参照して回答します
+- **モデル切替**：`config.json` の `openaiModel` で任意のモデルを指定可能
+- **ローカルモデル**：Ollama 等のローカルモデルも `openaiBaseUrl` 設定で利用可能
+
+設定項目：`openaiEnabled` / `openaiApiKey` / `openaiBaseUrl` / `openaiModel` / `openaiSystemPrompt` / `openaiMaxTokens` / `openaiTemperature`
+ランダムトーク：`openaiRandomTalkEnabled=true` で、指定間隔・確率でランダムにタイムライン上のユーザーに話しかけます。
+
 ### その他反応するフレーズ (トークのみ)
 * かわいい
 * なでなで
