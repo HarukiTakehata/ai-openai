@@ -1,20 +1,43 @@
-import 藍 from '@/ai';
-import { account } from '#/__mocks__/account';
 import TestModule from '#/__modules__/test';
-import { StreamingApi } from '#/__mocks__/ws';
 
-process.env.NODE_ENV = 'test';
+function createModule() {
+	const mod = new TestModule();
+	const moduleData: any[] = [];
+	const mockAI: any = {
+		log: jest.fn(),
+		moduleData: {
+			findOne: jest.fn(() => null),
+			insertOne: jest.fn((doc: any) => {
+				moduleData.push(doc);
+				return doc;
+			}),
+			update: jest.fn(),
+		},
+	};
+	mod.init(mockAI);
+	return { mod, mockAI, hooks: mod.install() };
+}
 
-let ai: 藍;
+describe('module mention routing', () => {
+	it('handles matching messages and replies immediately', async () => {
+		const { hooks } = createModule();
+		const msg: any = {
+			text: 'ping',
+			reply: jest.fn(),
+		};
 
-beforeEach(() => {
-  ai = new 藍(account, [
-		new TestModule(),
-	]);
-});
+		expect(await hooks.mentionHook!(msg)).toBe(true);
+		expect(msg.reply).toHaveBeenCalledWith('PONG!', { immediate: true });
+	});
 
-test('mention hook', async () => {
-	const streaming = new StreamingApi();
+	it('returns false for unrelated messages', async () => {
+		const { hooks } = createModule();
+		const msg: any = {
+			text: 'fortune',
+			reply: jest.fn(),
+		};
 
-	
+		expect(await hooks.mentionHook!(msg)).toBe(false);
+		expect(msg.reply).not.toHaveBeenCalled();
+	});
 });

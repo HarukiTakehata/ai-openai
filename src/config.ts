@@ -14,16 +14,21 @@ type Config = {
 	memoryDir?: string;
 	// OpenAI 兼容 API 配置
 	openaiEnabled?: boolean;
-	openaiApiKey: string;
+	openaiApiKey?: string;
 	openaiBaseUrl?: string;
 	openaiModel?: string;
 	openaiSystemPrompt?: string;
 	openaiMaxTokens?: number;
 	openaiTemperature?: number;
-	// OpenAI 兼容 API 随机聊天配置
-	openaiRandomTalkEnabled?: boolean;
-	openaiRandomTalkProbability?: number;
-	openaiRandomTalkIntervalMinutes?: number;
+	openaiRequestTimeoutMs?: number;
+	openaiFileDownloadTimeoutMs?: number;
+	openaiMaxAttachmentBytes?: number;
+	openaiMaxAttachments?: number;
+	openaiMaxInputChars?: number;
+	openaiRateLimitPerMinute?: number;
+	openaiMaxConcurrentRequests?: number;
+	openaiDailyRequestLimit?: number;
+	openaiAllowedUserIds?: string[];
 };
 
 const config = require('../config.json');

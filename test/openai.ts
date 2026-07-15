@@ -10,6 +10,9 @@
  */
 
 import OpenAIModule from '@/modules/openai';
+import config from '@/config';
+import * as http from 'http';
+import * as loki from 'lokijs';
 import * as request from 'request-promise-native';
 
 // Mock config — 必须在最顶部，匹配 moduleNameMapper 解析后路径
@@ -33,6 +36,10 @@ jest.mock('@/config', () => ({
 		openaiMaxTokens: 1000,
 		openaiTemperature: 0.5,
 		openaiSystemPrompt: 'Test system prompt',
+		openaiRateLimitPerMinute: 3,
+		openaiMaxConcurrentRequests: 2,
+		openaiDailyRequestLimit: 100,
+		openaiMaxAttachmentBytes: 5 * 1024 * 1024,
 	},
 }));
 
@@ -42,32 +49,59 @@ jest.mock('request-promise-native', () => ({
 	get: jest.fn(),
 }));
 
-// 辅助：创建带 mock AI 的模块实例
+type TestHarness = {
+	mod: OpenAIModule;
+	mockAI: any;
+	db: loki;
+};
+
+const harnesses = new WeakMap<OpenAIModule, TestHarness>();
+
+// 辅助：创建带可持久化内存集合的 mock AI 模块实例
 function createModule(): OpenAIModule {
 	const mod = new OpenAIModule();
+	const db = new loki('openai-test.db');
+	const moduleData = db.addCollection('moduleData', { indices: ['module'] });
 	const mockAI: any = {
 		log: () => {},
 		api: jest.fn().mockResolvedValue({}),
-		getCollection: jest.fn().mockReturnValue({
-			findOne: () => null,
-			find: () => [],
-			insertOne: (doc: any) => doc,
-			update: () => {},
-			findAndRemove: () => {},
-			remove: () => {},
-		}),
-		moduleData: {
-			findOne: () => null,
-			insertOne: (doc: any) => doc,
-			update: () => {},
-		},
+		getCollection: jest.fn((name: string, opts?: any) =>
+			db.getCollection(name) || db.addCollection(name, opts)),
+		moduleData,
 		subscribeReply: jest.fn(),
 		unsubscribeReply: jest.fn(),
 		setTimeoutWithPersistence: jest.fn(),
 	};
 	mod.init(mockAI);
+	harnesses.set(mod, { mod, mockAI, db });
 	return mod;
 }
+
+function harness(mod: OpenAIModule): TestHarness {
+	return harnesses.get(mod)!;
+}
+
+function createMessage(overrides: Record<string, any> = {}): any {
+	return {
+		id: 'user-note-1',
+		userId: 'user-1',
+		isDm: false,
+		text: '@ai openai hello',
+		extractedText: 'openai hello',
+		quoteId: null,
+		reply: jest.fn().mockResolvedValue({ id: 'bot-reply-1' }),
+		...overrides,
+	};
+}
+
+const mutableConfig = config as any;
+const defaultOpenAIConfig = { ...mutableConfig };
+
+afterEach(() => {
+	Object.keys(mutableConfig).forEach(key => delete mutableConfig[key]);
+	Object.assign(mutableConfig, defaultOpenAIConfig);
+	jest.restoreAllMocks();
+});
 
 // ------ buildRequestBody ------
 
@@ -193,6 +227,7 @@ describe('callOpenAI', () => {
 		expect(callArgs.url).toBe('https://api.openai.com/v1/chat/completions');
 		expect(callArgs.headers.Authorization).toBe('Bearer sk-test-key');
 		expect(callArgs.json).toBe(true);
+		expect(callArgs.timeout).toBe(60_000);
 	});
 
 	it('应在 API 返回空 choices 时返回 null', async () => {
@@ -228,44 +263,324 @@ describe('callOpenAI', () => {
 
 describe('fileToBase64', () => {
 	let mod: OpenAIModule;
-	const mockGet = request.get as jest.Mock;
 
 	beforeEach(() => {
 		mod = createModule();
-		mockGet.mockReset();
 	});
 
-	it('应下载文件并转换为 base64 data URL 格式', async () => {
-		const buf = Buffer.from('fake-image-data');
-		mockGet.mockResolvedValueOnce({
-			body: buf,
-			headers: { 'content-type': 'image/png' },
+	async function withServer(
+		handler: http.RequestListener,
+		run: (url: string) => Promise<void>,
+	): Promise<void> {
+		const server = http.createServer(handler);
+		await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+		const address = server.address() as any;
+		try {
+			await run(`http://127.0.0.1:${address.port}/file`);
+		} finally {
+			await new Promise<void>(resolve => server.close(() => resolve()));
+		}
+	}
+
+	it('应以流式方式下载受限大小内的图片', async () => {
+		const body = Buffer.from('fake-image-data');
+		await withServer((_req, res) => {
+			res.writeHead(200, {
+				'content-type': 'image/png',
+				'content-length': body.length,
+			});
+			res.end(body);
+		}, async url => {
+			jest.spyOn(mod as any, 'resolveSafeFileUrl').mockResolvedValue({
+				url: new URL(url),
+				address: '127.0.0.1',
+				family: 4,
+			});
+			const result = await mod.fileToBase64(url);
+			expect(result).toEqual({
+				mimeType: 'image/png',
+				data: body.toString('base64'),
+			});
 		});
-
-		const result = await mod.fileToBase64('https://example.com/image.png');
-
-		expect(result).not.toBeNull();
-		expect(result!.mimeType).toBe('image/png');
-		expect(result!.data).toBe(buf.toString('base64'));
-		expect(mockGet).toHaveBeenCalledWith(
-			expect.objectContaining({
-				url: 'https://example.com/image.png',
-				encoding: null,
-			}),
-		);
 	});
 
-	it('应在下载失败时返回 null', async () => {
-		mockGet.mockRejectedValueOnce(new Error('Download failed'));
-		const result = await mod.fileToBase64('https://invalid.url/');
+	it('应拒绝非 HTTP(S) 协议和私网地址', async () => {
+		expect(await mod.fileToBase64('file:///etc/passwd')).toBeNull();
+		expect(await mod.fileToBase64('http://127.0.0.1/image.png')).toBeNull();
+		expect(mod.isBlockedAddress('10.0.0.1')).toBe(true);
+		expect(mod.isBlockedAddress('8.8.8.8')).toBe(false);
+	});
+
+	it('应拒绝超过大小限制的响应', async () => {
+		mutableConfig.openaiMaxAttachmentBytes = 4;
+		await withServer((_req, res) => {
+			res.writeHead(200, { 'content-type': 'image/png' });
+			res.end(Buffer.alloc(16));
+		}, async url => {
+			jest.spyOn(mod as any, 'resolveSafeFileUrl').mockResolvedValue({
+				url: new URL(url),
+				address: '127.0.0.1',
+				family: 4,
+			});
+			expect(await mod.fileToBase64(url)).toBeNull();
+		});
+	});
+
+	it('应拒绝重定向，避免跳转绕过地址校验', async () => {
+		await withServer((_req, res) => {
+			res.writeHead(302, { location: 'http://127.0.0.1/internal' });
+			res.end();
+		}, async url => {
+			jest.spyOn(mod as any, 'resolveSafeFileUrl').mockResolvedValue({
+				url: new URL(url),
+				address: '127.0.0.1',
+				family: 4,
+			});
+			expect(await mod.fileToBase64(url)).toBeNull();
+		});
+	});
+
+	it('应在 URL 解析失败时返回 null', async () => {
+		const result = await mod.fileToBase64('not a url');
 		expect(result).toBeNull();
 	});
 
-	it('应处理无 content-type header 的情况', async () => {
-		const buf = Buffer.from('data');
-		mockGet.mockResolvedValueOnce({ body: buf, headers: {} });
-		const result = await mod.fileToBase64('https://example.com/file');
-		expect(result!.mimeType).toBe('application/octet-stream');
+	it('应限制附件数量并跳过非图片类型', async () => {
+		mutableConfig.openaiMaxAttachments = 1;
+		const state = harness(mod);
+		state.mockAI.api.mockResolvedValueOnce({
+			files: [
+				{ url: 'https://example.com/file.txt', type: 'text/plain' },
+				{ url: 'https://example.com/one.png', type: 'image/png' },
+				{ url: 'https://example.com/two.png', type: 'image/png' },
+			],
+		});
+		const download = jest.spyOn(mod, 'fileToBase64').mockResolvedValue({
+			mimeType: 'image/png',
+			data: 'aW1hZ2U=',
+		});
+
+		const parts = await mod.extractFiles('note-1');
+		expect(parts).toHaveLength(1);
+		expect(download).toHaveBeenCalledTimes(1);
+		expect(download).toHaveBeenCalledWith('https://example.com/one.png');
+	});
+});
+
+describe('命令路由与开关', () => {
+	const mockPost = request.post as jest.Mock;
+
+	beforeEach(() => mockPost.mockReset());
+
+	it('只匹配独立命令，不会被 Bot 用户名或普通单词中的 ai 抢占', async () => {
+		const mod = createModule();
+		const hooks = mod.install();
+
+		expect(mod.extractPrompt('openai 你好')).toBe('你好');
+		expect(mod.extractPrompt('ai: hello')).toBe('hello');
+		expect(mod.extractPrompt('chatting')).toBeNull();
+		expect(mod.extractPrompt('chair')).toBeNull();
+		expect(await hooks.mentionHook!(createMessage({
+			text: '@ai fortune',
+			extractedText: 'fortune',
+		}))).toBe(false);
+		expect(mockPost).not.toHaveBeenCalled();
+	});
+
+	it('调用模型时会移除命令词，只传递实际提示词', async () => {
+		mockPost.mockResolvedValueOnce({
+			choices: [{ message: { content: 'answer' } }],
+		});
+		const mod = createModule();
+		const hooks = mod.install();
+		const msg = createMessage();
+
+		await hooks.mentionHook!(msg);
+
+		const body = mockPost.mock.calls[0][0].body;
+		expect(body.messages.at(-1)).toEqual({ role: 'user', content: 'hello' });
+		expect(msg.reply).toHaveBeenCalledWith('answer');
+	});
+
+	it('openaiEnabled=false 时不注册任何处理钩子', () => {
+		mutableConfig.openaiEnabled = false;
+		const mod = createModule();
+		expect(mod.install()).toEqual({});
+		expect(harness(mod).mockAI.getCollection).not.toHaveBeenCalled();
+	});
+});
+
+describe('多轮 Context 状态机', () => {
+	const mockPost = request.post as jest.Mock;
+
+	beforeEach(() => mockPost.mockReset());
+
+	it('使用 Context key 关联公开帖的下一轮，并延续历史', async () => {
+		mockPost
+			.mockResolvedValueOnce({ choices: [{ message: { content: 'first answer' } }] })
+			.mockResolvedValueOnce({ choices: [{ message: { content: 'second answer' } }] });
+		const mod = createModule();
+		const state = harness(mod);
+		const hooks = mod.install();
+
+		await hooks.mentionHook!(createMessage());
+		const firstSubscription = state.mockAI.subscribeReply.mock.calls[0];
+		const contextKey = firstSubscription[1];
+		expect(firstSubscription.slice(2, 5)).toEqual([false, 'bot-reply-1', {}]);
+
+		const followUp = createMessage({
+			id: 'user-note-2',
+			text: 'follow up',
+			extractedText: 'follow up',
+			reply: jest.fn().mockResolvedValue({ id: 'bot-reply-2' }),
+		});
+		await hooks.contextHook!(contextKey, followUp, {});
+
+		expect(state.mockAI.unsubscribeReply).toHaveBeenCalledWith(mod, contextKey);
+		const secondBody = mockPost.mock.calls[1][0].body;
+		expect(secondBody.messages.map((item: any) => item.content)).toEqual([
+			'Test system prompt',
+			'hello',
+			'first answer',
+			'follow up',
+		]);
+		const secondContextKey = state.mockAI.subscribeReply.mock.calls[1][1];
+		expect(secondContextKey).not.toBe(contextKey);
+		expect(state.mockAI.subscribeReply.mock.calls[1].slice(2, 5)).toEqual([
+			false,
+			'bot-reply-2',
+			{},
+		]);
+	});
+
+	it('DM 每一轮使用独立 key，但订阅目标始终是用户 ID', async () => {
+		mockPost
+			.mockResolvedValueOnce({ choices: [{ message: { content: 'dm first' } }] })
+			.mockResolvedValueOnce({ choices: [{ message: { content: 'dm second' } }] });
+		const mod = createModule();
+		const state = harness(mod);
+		const hooks = mod.install();
+
+		await hooks.mentionHook!(createMessage({
+			isDm: true,
+			reply: jest.fn().mockResolvedValue({ id: 'dm-reply-1' }),
+		}));
+		const firstKey = state.mockAI.subscribeReply.mock.calls[0][1];
+		expect(state.mockAI.subscribeReply.mock.calls[0].slice(2, 5)).toEqual([
+			true,
+			'user-1',
+			{},
+		]);
+
+		await hooks.contextHook!(firstKey, createMessage({
+			id: 'dm-message-2',
+			isDm: true,
+			text: 'next',
+			extractedText: 'next',
+			reply: jest.fn().mockResolvedValue({ id: 'dm-reply-2' }),
+		}), {});
+		const secondSubscription = state.mockAI.subscribeReply.mock.calls[1];
+		expect(secondSubscription[1]).not.toBe(firstKey);
+		expect(secondSubscription.slice(2, 5)).toEqual([true, 'user-1', {}]);
+	});
+
+	it('超时同时清理 Session 和持久化 Context', async () => {
+		mockPost.mockResolvedValueOnce({ choices: [{ message: { content: 'answer' } }] });
+		const mod = createModule();
+		const state = harness(mod);
+		const hooks = mod.install();
+		await hooks.mentionHook!(createMessage());
+
+		const timerData = state.mockAI.setTimeoutWithPersistence.mock.calls[0][2];
+		const contextKey = timerData.contextKey;
+		expect(state.db.getCollection('openaiSessions').findOne({ key: contextKey })).not.toBeNull();
+
+		hooks.timeoutCallback!(timerData);
+		expect(state.db.getCollection('openaiSessions').findOne({ key: contextKey })).toBeNull();
+		expect(state.mockAI.unsubscribeReply).toHaveBeenCalledWith(mod, contextKey);
+	});
+
+	it('找不到 Session 时也会清除陈旧 Context', async () => {
+		const mod = createModule();
+		const state = harness(mod);
+		const hooks = mod.install();
+		expect(await hooks.contextHook!('stale-key', createMessage(), {})).toBe(false);
+		expect(state.mockAI.unsubscribeReply).toHaveBeenCalledWith(mod, 'stale-key');
+	});
+});
+
+describe('滥用保护', () => {
+	const mockPost = request.post as jest.Mock;
+
+	beforeEach(() => mockPost.mockReset());
+
+	it('执行每用户每分钟限流', async () => {
+		mutableConfig.openaiRateLimitPerMinute = 1;
+		mockPost.mockResolvedValue({ choices: [{ message: { content: 'answer' } }] });
+		const mod = createModule();
+		const hooks = mod.install();
+		await hooks.mentionHook!(createMessage());
+		const blockedMessage = createMessage({ id: 'user-note-2' });
+		await hooks.mentionHook!(blockedMessage);
+
+		expect(mockPost).toHaveBeenCalledTimes(1);
+		expect(blockedMessage.reply).toHaveBeenCalledWith(
+			expect.stringContaining('1分'),
+			{ immediate: true },
+		);
+	});
+
+	it('执行持久化的全局每日请求上限', async () => {
+		mutableConfig.openaiDailyRequestLimit = 1;
+		mockPost.mockResolvedValue({ choices: [{ message: { content: 'answer' } }] });
+		const mod = createModule();
+		const hooks = mod.install();
+		await hooks.mentionHook!(createMessage());
+		const blockedMessage = createMessage({ userId: 'user-2', id: 'user-note-2' });
+		await hooks.mentionHook!(blockedMessage);
+
+		expect(mockPost).toHaveBeenCalledTimes(1);
+		expect(blockedMessage.reply).toHaveBeenCalledWith(
+			expect.stringContaining('本日のAI利用上限'),
+			{ immediate: true },
+		);
+	});
+
+	it('执行全局并发上限', async () => {
+		mutableConfig.openaiMaxConcurrentRequests = 1;
+		let finishFirst!: (value: any) => void;
+		mockPost.mockReturnValueOnce(new Promise(resolve => {
+			finishFirst = resolve;
+		}));
+		const mod = createModule();
+		const hooks = mod.install();
+		const first = hooks.mentionHook!(createMessage());
+		await new Promise(resolve => setImmediate(resolve));
+
+		const blockedMessage = createMessage({ userId: 'user-2', id: 'user-note-2' });
+		await hooks.mentionHook!(blockedMessage);
+		expect(blockedMessage.reply).toHaveBeenCalledWith(
+			expect.stringContaining('混雑'),
+			{ immediate: true },
+		);
+
+		finishFirst({ choices: [{ message: { content: 'answer' } }] });
+		await first;
+		expect(mockPost).toHaveBeenCalledTimes(1);
+	});
+
+	it('配置白名单后拒绝未授权用户', async () => {
+		mutableConfig.openaiAllowedUserIds = ['trusted-user'];
+		const mod = createModule();
+		const hooks = mod.install();
+		const blockedMessage = createMessage({ userId: 'unknown-user' });
+		await hooks.mentionHook!(blockedMessage);
+
+		expect(mockPost).not.toHaveBeenCalled();
+		expect(blockedMessage.reply).toHaveBeenCalledWith(
+			expect.stringContaining('権限'),
+			{ immediate: true },
+		);
 	});
 });
 

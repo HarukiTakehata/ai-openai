@@ -9,7 +9,7 @@
 - **上游仓库**: [syuilo/ai](https://github.com/syuilo/ai)
 - **本 fork**: 基于 v1.5.0，CommonJS 模块系统
 - **语言**: TypeScript 5.3 → 编译为 ES2020 CommonJS
-- **运行时**: Node.js 20+
+- **运行时**: Node.js 22（Docker 固定为 22.23.1）
 
 ---
 
@@ -89,7 +89,7 @@
 │
 ├── test/                  # === 测试 ===
 │   ├── tsconfig.json      # 测试专用 tsconfig (sourceMap: true)
-│   ├── openai.ts          # OpenAI 模块单元测试 (18 tests)
+│   ├── openai.ts          # OpenAI 模块单元测试 (32 tests)
 │   ├── core.ts            # 核心测试 (预存, 不完整)
 │   ├── __mocks__/         # Jest mocks
 │   │   ├── account.ts
@@ -108,7 +108,7 @@
 
 ```bash
 # 安装依赖
-npm install --legacy-peer-deps
+npm ci --legacy-peer-deps
 
 # 编译
 npm run build          # → tsc，输出到 built/
@@ -143,16 +143,22 @@ OpenAI 模块字段：
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `openaiEnabled` | boolean | — | 启用 OpenAI 模块 |
-| `openaiApiKey` | string | — | API 密钥 |
+| `openaiEnabled` | boolean | false | 启用 OpenAI 模块；必须显式设为 `true` |
+| `openaiApiKey` | string | — | API 密钥（启用模块时必填） |
 | `openaiBaseUrl` | string | `https://api.openai.com/v1` | 兼容端点（Ollama: `http://localhost:11434/v1`） |
 | `openaiModel` | string | `gpt-4o-mini` | 模型名 |
 | `openaiSystemPrompt` | string | 内置日语 prompt | 系统提示词 |
 | `openaiMaxTokens` | number | 2800 | 最大输出 token |
 | `openaiTemperature` | number | 0.7 | 温度 |
-| `openaiRandomTalkEnabled` | boolean | false | 随机搭话 |
-| `openaiRandomTalkProbability` | number | 0.02 | 随机搭话概率 |
-| `openaiRandomTalkIntervalMinutes` | number | 720 | 随机搭话间隔（分钟） |
+| `openaiRequestTimeoutMs` | number | 60000 | 模型请求超时（毫秒） |
+| `openaiFileDownloadTimeoutMs` | number | 10000 | 附件下载超时（毫秒） |
+| `openaiMaxAttachmentBytes` | number | 5242880 | 单附件大小上限 |
+| `openaiMaxAttachments` | number | 2 | 单次图片附件数量上限 |
+| `openaiMaxInputChars` | number | 12000 | 提示词与文本历史字符上限 |
+| `openaiRateLimitPerMinute` | number | 3 | 每用户每分钟请求上限 |
+| `openaiMaxConcurrentRequests` | number | 2 | 全局并发请求上限 |
+| `openaiDailyRequestLimit` | number | 100 | UTC 日全局请求上限 |
+| `openaiAllowedUserIds` | string[] | 未设置 | 可选 Misskey 用户 ID 白名单 |
 
 ---
 
@@ -217,7 +223,8 @@ memory.json (自动保存, 1秒间隔)
 ├── friends       — 用户数据 (按 userId 索引)
 │   └── {love, name, perModulesData, married, ...}
 ├── moduleData    — 模块私有数据
-└── openaiSessions — OpenAI 模块会话记录
+├── openaiSessions — OpenAI 模块会话记录
+└── openaiUsage    — OpenAI 每日全局请求计数
 ```
 
 ### 5. WebSocket 连接池 (`stream.ts`)
