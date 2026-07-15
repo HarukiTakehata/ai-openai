@@ -184,9 +184,12 @@ export default class extends Module {
 	@autobind
 	public extractPrompt(text: string): string | null {
 		if (!text) return null;
-		const match = text.trim().match(MODULE_TRIGGER);
-		if (!match) return null;
-		return text.trim().slice(match[0].length).replace(/^[\s：:]+/, '').trim();
+		const trimmed = text.trim();
+		const match = trimmed.match(MODULE_TRIGGER);
+		if (match) {
+			return trimmed.slice(match[0].length).replace(/^[\s：:]+/, '').trim();
+		}
+		return trimmed;
 	}
 
 	@autobind

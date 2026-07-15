@@ -67,7 +67,6 @@ promiseRetry(retry => {
 	// 藍起動
 	new 藍(account, [
 		new CoreModule(),
-		...(config.openaiEnabled === true ? [new OpenAIModule()] : []),
 		new EmojiModule(),
 		new EmojiReactModule(),
 		new FortuneModule(),
@@ -90,6 +89,7 @@ promiseRetry(retry => {
 		new NotingModule(),
 		new PollModule(),
 		new ReminderModule(),
+		...(config.openaiEnabled === true ? [new OpenAIModule()] : []),
 	]);
 }).catch(e => {
 	log(chalk.red('Failed to fetch the account'));

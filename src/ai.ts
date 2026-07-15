@@ -143,9 +143,9 @@ export default class 藍 {
 		// メンションされたとき
 		mainStream.on('mention', async data => {
 			if (data.userId == this.account.id) return; // 自分は弾く
+			// Misskeyのバグで投稿が非公開扱いになる
+			if (data.text == null) data = await this.api('notes/show', { noteId: data.id });
 			if (data.text && data.text.startsWith('@' + this.account.username)) {
-				// Misskeyのバグで投稿が非公開扱いになる
-				if (data.text == null) data = await this.api('notes/show', { noteId: data.id });
 				this.onReceiveMessage(new Message(this, data, false));
 			}
 		});
@@ -229,7 +229,7 @@ export default class 藍 {
 			noteId: msg.replyId
 		});
 
-		let reaction: string | null = 'love';
+		let reaction: string | null = 'question';
 		let immediate: boolean = false;
 
 		//#region
@@ -244,6 +244,8 @@ export default class 藍 {
 			if (res != null && typeof res === 'object') {
 				if (res.reaction != null) reaction = res.reaction;
 				if (res.immediate != null) immediate = res.immediate;
+			} else if (res) {
+				reaction = 'love';
 			}
 		};
 
@@ -256,6 +258,8 @@ export default class 藍 {
 			if (res != null && typeof res === 'object') {
 				if (res.reaction != null) reaction = res.reaction;
 				if (res.immediate != null) immediate = res.immediate;
+			} else if (res) {
+				reaction = 'love';
 			}
 
 			if (res === false) {

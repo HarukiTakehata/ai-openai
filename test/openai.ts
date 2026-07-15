@@ -376,19 +376,35 @@ describe('命令路由与开关', () => {
 
 	beforeEach(() => mockPost.mockReset());
 
-	it('只匹配独立命令，不会被 Bot 用户名或普通单词中的 ai 抢占', async () => {
+	it('支持独立命令词触发，也接受无触发词的直接对话', async () => {
 		const mod = createModule();
 		const hooks = mod.install();
 
 		expect(mod.extractPrompt('openai 你好')).toBe('你好');
 		expect(mod.extractPrompt('ai: hello')).toBe('hello');
-		expect(mod.extractPrompt('chatting')).toBeNull();
-		expect(mod.extractPrompt('chair')).toBeNull();
-		expect(await hooks.mentionHook!(createMessage({
+		// 无触发词时返回原文作为 prompt（兜底行为）
+		expect(mod.extractPrompt('chatting')).toBe('chatting');
+		expect(mod.extractPrompt('chair')).toBe('chair');
+		// 只有触发词无正文时返回空字符串（由 mentionHook 展示帮助信息）
+		expect(mod.extractPrompt('openai')).toBe('');
+	});
+
+	it('作为兜底模块会处理无特定模块匹配的任意内容', async () => {
+		mockPost.mockResolvedValueOnce({ files: [] });
+		mockPost.mockResolvedValueOnce({
+			choices: [{ message: { content: 'answer from ai' } }],
+		});
+		mockPost.mockResolvedValueOnce({ createdNote: { id: 'reply-note-id' } });
+
+		const mod = createModule();
+		const hooks = mod.install();
+
+		const result = await hooks.mentionHook!(createMessage({
 			text: '@ai fortune',
 			extractedText: 'fortune',
-		}))).toBe(false);
-		expect(mockPost).not.toHaveBeenCalled();
+		}));
+		expect(result).toEqual({ reaction: 'like' });
+		expect(mockPost).toHaveBeenCalled();
 	});
 
 	it('调用模型时会移除命令词，只传递实际提示词', async () => {
