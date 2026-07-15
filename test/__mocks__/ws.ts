@@ -1,17 +1,20 @@
-import * as websocket from 'websocket';
+import * as WebSocket from 'ws';
 
 export class StreamingApi {
-	private ws: WS;
+	private ws: WebSocket;
 
 	constructor() {
-		this.ws = new WS('ws://localhost/streaming');
+		this.ws = new WebSocket('ws://localhost/streaming');
 	}
 
 	public async waitForMainChannelConnected() {
-		await expect(this.ws).toReceiveMessage("hello");
+		// Wait for connection to be established
+		return new Promise<void>((resolve) => {
+			this.ws.on('open', () => resolve());
+		});
 	}
 
-	public send(message) {
+	public send(message: any) {
 		this.ws.send(JSON.stringify(message));
 	}
 }

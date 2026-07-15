@@ -3,10 +3,11 @@
 	"compilerOptions": {
 		"baseUrl": ".",
 		"rootDir": "../",
+		"sourceMap": true,
 		"paths": {
 			"@/*": ["../src/*"],
 			"#/*": ["./*"]
-		},
+		}
 	},
 	"compileOnSave": false,
 	"include": [

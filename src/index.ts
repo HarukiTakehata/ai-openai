@@ -34,6 +34,7 @@ import SleepReportModule from './modules/sleep-report';
 import NotingModule from './modules/noting';
 import PollModule from './modules/poll';
 import ReminderModule from './modules/reminder';
+import OpenAIModule from './modules/openai';
 
 console.log('   __    ____  _____  ___ ');
 console.log('  /__\\  (_  _)(  _  )/ __)');
@@ -66,6 +67,7 @@ promiseRetry(retry => {
 	// 藍起動
 	new 藍(account, [
 		new CoreModule(),
+		new OpenAIModule(),
 		new EmojiModule(),
 		new EmojiReactModule(),
 		new FortuneModule(),
