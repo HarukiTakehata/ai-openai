@@ -53,7 +53,7 @@ docker-compose up
   "openaiApiKey": "sk-your-api-key",
   "openaiBaseUrl": "https://api.openai.com/v1",
   "openaiModel": "gpt-4o-mini",
-  "openaiSystemPrompt": "あなたはMisskey看板娘の女の子AI、藍として振る舞ってください...",
+  "openaiSystemPrompt": "你是一个名为「蓝」的 Misskey 看板娘 AI 女孩...",
   "openaiMaxTokens": 2800,
   "openaiTemperature": 0.7,
   "openaiRequestTimeoutMs": 60000,
@@ -75,7 +75,7 @@ docker-compose up
 | `openaiApiKey` | string | — | API 密钥（启用模块时必填） |
 | `openaiBaseUrl` | string | `https://api.openai.com/v1` | API 端点。Ollama 用户填 `http://localhost:11434/v1` |
 | `openaiModel` | string | `gpt-4o-mini` | 模型名称 |
-| `openaiSystemPrompt` | string | 内置日语 prompt | 系统提示词 |
+| `openaiSystemPrompt` | string | 内置中文 prompt | 系统提示词 |
 | `openaiMaxTokens` | number | 2800 | 最大输出 token |
 | `openaiTemperature` | number | 0.7 | 生成温度 (0-2) |
 | `openaiRequestTimeoutMs` | number | 60000 | 模型 API 请求超时（毫秒） |
@@ -120,7 +120,7 @@ OpenAI 对话只接受独立命令 `openai`、`ai` 或 `chat`，例如 `@ai open
 
 ```bash
 npm test                    # 全部测试
-npx jest test/openai.ts     # 仅 OpenAI 模块测试 (32 项)
+npx jest test/openai.ts     # 仅 OpenAI 模块测试 (38 项)
 ```
 
 ## 开源许可证

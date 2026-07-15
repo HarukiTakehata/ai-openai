@@ -89,7 +89,7 @@
 │
 ├── test/                  # === 测试 ===
 │   ├── tsconfig.json      # 测试专用 tsconfig (sourceMap: true)
-│   ├── openai.ts          # OpenAI 模块单元测试 (32 tests)
+│   ├── openai.ts          # OpenAI 模块单元测试 (38 tests)
 │   ├── core.ts            # 核心测试 (预存, 不完整)
 │   ├── __mocks__/         # Jest mocks
 │   │   ├── account.ts
@@ -147,7 +147,7 @@ OpenAI 模块字段：
 | `openaiApiKey` | string | — | API 密钥（启用模块时必填） |
 | `openaiBaseUrl` | string | `https://api.openai.com/v1` | 兼容端点（Ollama: `http://localhost:11434/v1`） |
 | `openaiModel` | string | `gpt-4o-mini` | 模型名 |
-| `openaiSystemPrompt` | string | 内置日语 prompt | 系统提示词 |
+| `openaiSystemPrompt` | string | 内置中文 prompt | 系统提示词 |
 | `openaiMaxTokens` | number | 2800 | 最大输出 token |
 | `openaiTemperature` | number | 0.7 | 温度 |
 | `openaiRequestTimeoutMs` | number | 60000 | 模型请求超时（毫秒） |

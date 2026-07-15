@@ -50,6 +50,8 @@ const DEFAULT_RATE_LIMIT_PER_MINUTE = 3;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 2;
 const DEFAULT_DAILY_REQUEST_LIMIT = 100;
 const TIMEOUT_TIME = 1000 * 60 * 30;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 60_000;
 const SUPPORTED_IMAGE_TYPES = new Set([
 	'image/gif',
 	'image/jpeg',
@@ -57,10 +59,12 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 	'image/webp',
 ]);
 const DEFAULT_SYSTEM_PROMPT =
-	'あなたはMisskey看板娘の女の子AI、藍として振る舞ってください。' +
-	'丁寧で親しみやすい口調で、ユーザーを「ご主人様」と呼びます。' +
-	'Markdownを使って2800文字以内で回答してください。';
+	'你是一个名为「蓝」的 Misskey 看板娘 AI 女孩。' +
+	'请使用亲切、自然且礼貌的中文，将用户称为「主人」。' +
+	'请使用 Markdown 格式，并在 2800 字以内回答。';
 
+// Reject addresses that could reach the host, local network, or non-routable ranges.
+// DNS results are checked before the selected public address is pinned to the request.
 const blockedNetworks = new net.BlockList();
 [
 	['0.0.0.0', 8],
@@ -94,8 +98,10 @@ export default class extends Module {
 
 	private sessions!: loki.Collection<ChatSession>;
 	private usage!: loki.Collection<DailyUsage>;
+	// Per-minute timestamps stay in memory; the UTC daily counter is persisted in Loki.
 	private requestsByUser = new Map<string, number[]>();
 	private activeRequests = 0;
+	private lastRateLimitCleanupAt = 0;
 
 	@autobind
 	public install() {
@@ -174,6 +180,7 @@ export default class extends Module {
 			: fallback;
 	}
 
+	/** 解析严格边界的聊天命令，并移除命令前缀。 */
 	@autobind
 	public extractPrompt(text: string): string | null {
 		if (!text) return null;
@@ -239,6 +246,7 @@ export default class extends Module {
 				json: true,
 				timeout: this.requestTimeoutMs,
 			});
+			this.log('OpenAI API response received');
 
 			const content = res?.choices?.[0]?.message?.content;
 			if (typeof content === 'string') return content.trim();
@@ -251,6 +259,7 @@ export default class extends Module {
 		}
 	}
 
+	/** 下载经过地址校验的附件并转换为模型所需的 Base64。 */
 	@autobind
 	public async fileToBase64(fileUrl: string): Promise<{ mimeType: string; data: string } | null> {
 		try {
@@ -266,6 +275,10 @@ export default class extends Module {
 		}
 	}
 
+	/**
+	 * 解析附件 URL，拒绝非 HTTP(S)、私网和保留地址，并返回要钉选的 DNS 结果。
+	 * 所有解析结果都必须为公网地址，避免多记录域名绕过校验。
+	 */
 	private async resolveSafeFileUrl(fileUrl: string): Promise<ResolvedFileUrl> {
 		let url: URL;
 		try {
@@ -303,6 +316,7 @@ export default class extends Module {
 		return blockedNetworks.check(address, family === 6 ? 'ipv6' : 'ipv4');
 	}
 
+	/** 使用已验证的 IP 建立请求，流式执行超时、状态码和字节数检查。 */
 	private downloadFile(resolved: ResolvedFileUrl): Promise<{ mimeType: string; buffer: Buffer }> {
 		return new Promise((resolve, reject) => {
 			const transport = resolved.url.protocol === 'https:' ? https : http;
@@ -377,6 +391,7 @@ export default class extends Module {
 		});
 	}
 
+	/** 从 Misskey Note 中提取数量受限且 MIME 受支持的图片附件。 */
 	@autobind
 	public async extractFiles(noteId: string): Promise<any[]> {
 		const parts: any[] = [];
@@ -389,10 +404,21 @@ export default class extends Module {
 				if (parts.length >= this.maxAttachments) break;
 				const fileUrl = file.url || file.thumbnailUrl;
 				const declaredType = String(file.type || '').split(';')[0].toLowerCase();
-				if (!fileUrl || !SUPPORTED_IMAGE_TYPES.has(declaredType)) continue;
+				if (!fileUrl) {
+					this.log('Skipping attachment without a downloadable URL');
+					continue;
+				}
+				if (!SUPPORTED_IMAGE_TYPES.has(declaredType)) {
+					this.log(`Skipping unsupported declared attachment MIME type: ${declaredType || 'unknown'}`);
+					continue;
+				}
 
 				const result = await this.fileToBase64(fileUrl);
-				if (!result || !SUPPORTED_IMAGE_TYPES.has(result.mimeType)) continue;
+				if (!result) continue;
+				if (!SUPPORTED_IMAGE_TYPES.has(result.mimeType)) {
+					this.log(`Skipping unsupported downloaded attachment MIME type: ${result.mimeType}`);
+					continue;
+				}
 				parts.push({
 					type: 'image_url',
 					image_url: {
@@ -408,6 +434,7 @@ export default class extends Module {
 		return parts;
 	}
 
+	/** 仅处理显式 OpenAI 命令，并创建首轮会话。 */
 	@autobind
 	private async mentionHook(msg: Message): Promise<boolean | { reaction: string | null; immediate?: boolean }> {
 		if (config.openaiEnabled !== true) return false;
@@ -415,7 +442,7 @@ export default class extends Module {
 		const prompt = this.extractPrompt(msg.extractedText || '');
 		if (prompt == null) return false;
 		if (prompt.length === 0) {
-			await msg.reply('使い方: `openai 質問内容` のように話しかけてください。', {
+			await msg.reply('用法：请使用 `openai 问题内容` 的格式与我对话。', {
 				immediate: true,
 			});
 			return { reaction: 'like', immediate: true };
@@ -433,7 +460,7 @@ export default class extends Module {
 				if (quotedNote?.text) {
 					session.history = [{
 						role: 'user',
-						content: `ユーザーが与えた引用文章: ${quotedNote.text}`,
+						content: `用户提供的引用内容：${quotedNote.text}`,
 					}];
 				}
 			} catch (err: any) {
@@ -445,6 +472,7 @@ export default class extends Module {
 		return { reaction: 'like' };
 	}
 
+	/** 按唯一 Context key 恢复多轮会话，先清理旧订阅再创建下一轮。 */
 	@autobind
 	private async contextHook(
 		key: string | null,
@@ -463,16 +491,18 @@ export default class extends Module {
 			return false;
 		}
 
+		this.log(`Session resumed: ${key}`);
 		this.unsubscribeReply(key);
 		this.sessions.remove(session);
 		await this.handleChat(session, msg, msg.extractedText || msg.text || '');
 		return { reaction: 'like' };
 	}
 
+	/** 执行输入限制、请求准入、模型调用，并持久化下一轮 Context。 */
 	@autobind
 	private async handleChat(session: ChatSession, msg: Message, prompt: string): Promise<boolean> {
 		if (this.conversationLength(session, prompt) > this.maxInputChars) {
-			await msg.reply('会話が長すぎます。内容を短くして、新しい会話を始めてください。', {
+			await msg.reply('对话内容过长，请缩短内容后开启新的对话。', {
 				immediate: true,
 			});
 			return true;
@@ -480,6 +510,7 @@ export default class extends Module {
 
 		const blocked = this.acquireRequest(msg.userId);
 		if (blocked) {
+			this.log(`Request blocked: reason=${blocked} user=${msg.userId}`);
 			await msg.reply(this.usageMessage(blocked), { immediate: true });
 			return true;
 		}
@@ -499,7 +530,7 @@ export default class extends Module {
 			const responseText = await this.callOpenAI(messages);
 
 			if (!responseText) {
-				await msg.reply('ごめんなさい、AIの応答を取得できませんでした…');
+				await msg.reply('抱歉，无法获取 AI 回复…');
 				return true;
 			}
 
@@ -521,9 +552,10 @@ export default class extends Module {
 			});
 			this.subscribeReply(contextKey, msg.isDm, contextTarget, {});
 			this.setTimeoutWithPersistence(TIMEOUT_TIME, { contextKey });
+			this.log(`Session created: ${contextKey}`);
 			return true;
 		} finally {
-			this.activeRequests = Math.max(0, this.activeRequests - 1);
+			this.releaseRequest();
 		}
 	}
 
@@ -534,14 +566,16 @@ export default class extends Module {
 		}, prompt.length);
 	}
 
+	/** 按白名单、用户频率、全局并发和每日额度的顺序执行请求准入。 */
 	private acquireRequest(userId: string): UsageBlockReason | null {
 		if (config.openaiAllowedUserIds?.length && !config.openaiAllowedUserIds.includes(userId)) {
 			return 'not-allowed';
 		}
 
 		const now = Date.now();
+		this.cleanupRateLimitEntries(now);
 		const recent = (this.requestsByUser.get(userId) || []).filter(
-			timestamp => now - timestamp < 60_000,
+			timestamp => now - timestamp < RATE_LIMIT_WINDOW_MS,
 		);
 		if (recent.length >= this.rateLimitPerMinute) return 'rate-limit';
 		if (this.activeRequests >= this.maxConcurrentRequests) return 'concurrency';
@@ -562,19 +596,48 @@ export default class extends Module {
 		return null;
 	}
 
+	/** 定期淘汰已过窗口的用户条目，避免长期运行时 Map 持续增长。 */
+	private cleanupRateLimitEntries(now: number): void {
+		if (now - this.lastRateLimitCleanupAt < RATE_LIMIT_CLEANUP_INTERVAL_MS) return;
+
+		let removedUsers = 0;
+		for (const [userId, timestamps] of this.requestsByUser) {
+			const recent = timestamps.filter(timestamp => now - timestamp < RATE_LIMIT_WINDOW_MS);
+			if (recent.length === 0) {
+				this.requestsByUser.delete(userId);
+				removedUsers += 1;
+			} else if (recent.length !== timestamps.length) {
+				this.requestsByUser.set(userId, recent);
+			}
+		}
+		this.lastRateLimitCleanupAt = now;
+		if (removedUsers > 0) this.log(`Cleaned ${removedUsers} expired rate-limit entries`);
+	}
+
+	/** 释放并发槽位；异常下溢会写入日志而不是被静默吞掉。 */
+	private releaseRequest(): void {
+		if (this.activeRequests <= 0) {
+			this.log('WARNING: active request counter underflow prevented');
+			this.activeRequests = 0;
+			return;
+		}
+		this.activeRequests -= 1;
+	}
+
 	private usageMessage(reason: UsageBlockReason): string {
 		switch (reason) {
 			case 'not-allowed':
-				return 'このAI機能を利用する権限がありません。';
+				return '您没有使用此 AI 功能的权限。';
 			case 'rate-limit':
-				return '短時間のリクエストが多すぎます。1分ほど待ってから再試行してください。';
+				return '请求过于频繁，请等待约 1 分钟后重试。';
 			case 'concurrency':
-				return 'AIはただいま混雑しています。少し待ってから再試行してください。';
+				return 'AI 当前繁忙，请稍后重试。';
 			case 'daily-limit':
-				return '本日のAI利用上限に達しました。管理者に確認してください。';
+				return '今日 AI 使用次数已达上限，请联系管理员。';
 		}
 	}
 
+	/** 同时清理 Loki Session 与持久化 Context，并兼容旧 noteId 定时器。 */
 	@autobind
 	private timeoutCallback(data: any) {
 		const contextKey = data?.contextKey || data?.noteId;

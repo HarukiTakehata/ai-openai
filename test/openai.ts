@@ -30,6 +30,7 @@ jest.mock('@/config', () => ({
 		chartEnabled: false,
 		serverMonitoring: false,
 		openaiEnabled: true,
+		// Deliberately fake credential used only by the mocked HTTP client below.
 		openaiApiKey: 'sk-test-key',
 		openaiBaseUrl: 'https://api.openai.com/v1',
 		openaiModel: 'gpt-4o-mini',
@@ -63,7 +64,7 @@ function createModule(): OpenAIModule {
 	const db = new loki('openai-test.db');
 	const moduleData = db.addCollection('moduleData', { indices: ['module'] });
 	const mockAI: any = {
-		log: () => {},
+		log: jest.fn(),
 		api: jest.fn().mockResolvedValue({}),
 		getCollection: jest.fn((name: string, opts?: any) =>
 			db.getCollection(name) || db.addCollection(name, opts)),
@@ -364,6 +365,9 @@ describe('fileToBase64', () => {
 		expect(parts).toHaveLength(1);
 		expect(download).toHaveBeenCalledTimes(1);
 		expect(download).toHaveBeenCalledWith('https://example.com/one.png');
+		expect(state.mockAI.log).toHaveBeenCalledWith(
+			expect.stringContaining('unsupported declared attachment MIME type: text/plain'),
+		);
 	});
 });
 
@@ -400,6 +404,58 @@ describe('命令路由与开关', () => {
 		const body = mockPost.mock.calls[0][0].body;
 		expect(body.messages.at(-1)).toEqual({ role: 'user', content: 'hello' });
 		expect(msg.reply).toHaveBeenCalledWith('answer');
+	});
+
+	it('空命令返回中文用法说明', async () => {
+		const mod = createModule();
+		const hooks = mod.install();
+		const msg = createMessage({
+			text: '@ai openai',
+			extractedText: 'openai',
+		});
+
+		await hooks.mentionHook!(msg);
+		expect(msg.reply).toHaveBeenCalledWith(
+			'用法：请使用 `openai 问题内容` 的格式与我对话。',
+			{ immediate: true },
+		);
+		expect(mockPost).not.toHaveBeenCalled();
+	});
+
+	it('未配置自定义提示词时使用中文默认系统提示词', async () => {
+		delete mutableConfig.openaiSystemPrompt;
+		mockPost.mockResolvedValueOnce({ choices: [{ message: { content: '回答' } }] });
+		const mod = createModule();
+		const hooks = mod.install();
+
+		await hooks.mentionHook!(createMessage());
+		const systemPrompt = mockPost.mock.calls[0][0].body.messages[0].content;
+		expect(systemPrompt).toContain('名为「蓝」的 Misskey 看板娘 AI 女孩');
+		expect(systemPrompt).toContain('亲切、自然且礼貌的中文');
+	});
+
+	it('过长输入返回中文提示且不调用模型', async () => {
+		mutableConfig.openaiMaxInputChars = 3;
+		const mod = createModule();
+		const hooks = mod.install();
+		const msg = createMessage();
+
+		await hooks.mentionHook!(msg);
+		expect(msg.reply).toHaveBeenCalledWith(
+			'对话内容过长，请缩短内容后开启新的对话。',
+			{ immediate: true },
+		);
+		expect(mockPost).not.toHaveBeenCalled();
+	});
+
+	it('模型响应失败时返回中文错误提示', async () => {
+		mockPost.mockResolvedValueOnce({ choices: [] });
+		const mod = createModule();
+		const hooks = mod.install();
+		const msg = createMessage();
+
+		await hooks.mentionHook!(msg);
+		expect(msg.reply).toHaveBeenCalledWith('抱歉，无法获取 AI 回复…');
 	});
 
 	it('openaiEnabled=false 时不注册任何处理钩子', () => {
@@ -525,7 +581,7 @@ describe('滥用保护', () => {
 
 		expect(mockPost).toHaveBeenCalledTimes(1);
 		expect(blockedMessage.reply).toHaveBeenCalledWith(
-			expect.stringContaining('1分'),
+			expect.stringContaining('1 分钟'),
 			{ immediate: true },
 		);
 	});
@@ -541,7 +597,7 @@ describe('滥用保护', () => {
 
 		expect(mockPost).toHaveBeenCalledTimes(1);
 		expect(blockedMessage.reply).toHaveBeenCalledWith(
-			expect.stringContaining('本日のAI利用上限'),
+			expect.stringContaining('今日 AI 使用次数已达上限'),
 			{ immediate: true },
 		);
 	});
@@ -560,7 +616,7 @@ describe('滥用保护', () => {
 		const blockedMessage = createMessage({ userId: 'user-2', id: 'user-note-2' });
 		await hooks.mentionHook!(blockedMessage);
 		expect(blockedMessage.reply).toHaveBeenCalledWith(
-			expect.stringContaining('混雑'),
+			expect.stringContaining('当前繁忙'),
 			{ immediate: true },
 		);
 
@@ -578,8 +634,40 @@ describe('滥用保护', () => {
 
 		expect(mockPost).not.toHaveBeenCalled();
 		expect(blockedMessage.reply).toHaveBeenCalledWith(
-			expect.stringContaining('権限'),
+			expect.stringContaining('权限'),
 			{ immediate: true },
+		);
+	});
+
+	it('定期清理没有近期请求的用户限流记录', () => {
+		const mod = createModule();
+		const state = harness(mod);
+		mod.install();
+		let now = 1;
+		jest.spyOn(Date, 'now').mockImplementation(() => now);
+
+		expect((mod as any).acquireRequest('old-user')).toBeNull();
+		(mod as any).releaseRequest();
+		now = 60_002;
+		expect((mod as any).acquireRequest('new-user')).toBeNull();
+		(mod as any).releaseRequest();
+
+		expect((mod as any).requestsByUser.has('old-user')).toBe(false);
+		expect((mod as any).requestsByUser.has('new-user')).toBe(true);
+		expect(state.mockAI.log).toHaveBeenCalledWith(
+			expect.stringContaining('Cleaned 1 expired rate-limit entries'),
+		);
+	});
+
+	it('并发计数器下溢时记录警告并保持为零', () => {
+		const mod = createModule();
+		const state = harness(mod);
+		mod.install();
+
+		(mod as any).releaseRequest();
+		expect((mod as any).activeRequests).toBe(0);
+		expect(state.mockAI.log).toHaveBeenCalledWith(
+			expect.stringContaining('WARNING: active request counter underflow prevented'),
 		);
 	});
 });
