@@ -150,7 +150,10 @@ export default class extends Module {
 		if (!msg.includes(['摸'])) return false;
 
 		// 仅限私聊
-		if (!msg.isDm) return true;
+		if (!msg.isDm) {
+			this.log(`Silent heart-only reply: nadenade() requires DM, user=${msg.userId}`);
+			return true;
+		}
 
 		//#region 每天只提升一次好感度等级（只有在她们不讨厌发出者的情况下）。
 		if (msg.friend.love >= 0) {
@@ -185,7 +188,10 @@ export default class extends Module {
 		if (!msg.includes(['可爱', '好看'])) return false;
 
 		// 仅限私聊
-		if (!msg.isDm) return true;
+		if (!msg.isDm) {
+			this.log(`Silent heart-only reply: kawaii() requires DM, user=${msg.userId}`);
+			return true;
+		}
 
 		msg.reply(getSerif(
 			msg.friend.love >= 5 ? serifs.core.kawaii.love :
@@ -200,7 +206,10 @@ export default class extends Module {
 		if (!msg.or(['喜欢', '爱'])) return false;
 
 		// 仅限私聊
-		if (!msg.isDm) return true;
+		if (!msg.isDm) {
+			this.log(`Silent heart-only reply: suki() requires DM, user=${msg.userId}`);
+			return true;
+		}
 
 		msg.reply(
 			msg.friend.love >= 5 ? (msg.friend.name ? serifs.core.suki.love(msg.friend.name) : serifs.core.suki.normal) :
@@ -215,7 +224,10 @@ export default class extends Module {
 		if (!msg.or(['抱'])) return false;
 
 		// 仅限私聊
-		if (!msg.isDm) return true;
+		if (!msg.isDm) {
+			this.log(`Silent heart-only reply: hug() requires DM, user=${msg.userId}`);
+			return true;
+		}
 
 		//#region 如果距离上次拥抱还没有一分钟，就不要回复了
 		// 这是因为当收到「抱抱」并回答「抱抱」时，对方的
@@ -229,7 +241,10 @@ export default class extends Module {
 		const data = msg.friend.getPerModulesData(this);
 
 		if (data.lastHuggedAt != null) {
-			if (now - data.lastHuggedAt < (1000 * 60)) return true;
+			if (now - data.lastHuggedAt < (1000 * 60)) {
+				this.log(`Silent heart-only reply: hug() cooldown active (${Math.round((now - data.lastHuggedAt) / 1000)}s ago), user=${msg.userId}`);
+				return true;
+			}
 		}
 
 		data.lastHuggedAt = now;
@@ -249,7 +264,10 @@ export default class extends Module {
 		if (!msg.includes(['踩'])) return false;
 
 		// 仅限私聊
-		if (!msg.isDm) return true;
+		if (!msg.isDm) {
+			this.log(`Silent heart-only reply: humu() requires DM, user=${msg.userId}`);
+			return true;
+		}
 
 		msg.reply(
 			msg.friend.love >= 5 ? serifs.core.humu.love :
@@ -264,7 +282,10 @@ export default class extends Module {
 		if (!msg.includes(['骂'])) return false;
 
 		// 仅限私聊
-		if (!msg.isDm) return true;
+		if (!msg.isDm) {
+			this.log(`Silent heart-only reply: batou() requires DM, user=${msg.userId}`);
+			return true;
+		}
 
 		msg.reply(
 			msg.friend.love >= 5 ? serifs.core.batou.love :
@@ -279,7 +300,10 @@ export default class extends Module {
 		if (!msg.or(['痛', '难受', '难过', '哭']) && !(msg.extractedText.endsWith('痛') || msg.extractedText.endsWith('难受') || msg.extractedText.endsWith('难过') || msg.extractedText.endsWith('哭'))) return false;
 
 		// 仅限私聊
-		if (!msg.isDm) return true;
+		if (!msg.isDm) {
+			this.log(`Silent heart-only reply: itai() requires DM, user=${msg.userId}`);
+			return true;
+		}
 
 		msg.reply(serifs.core.itai(msg.friend.name));
 
@@ -291,7 +315,10 @@ export default class extends Module {
 		if (!msg.or(['汪'])) return false;
 
 		// 仅限私聊
-		if (!msg.isDm) return true;
+		if (!msg.isDm) {
+			this.log(`Silent heart-only reply: ote() requires DM, user=${msg.userId}`);
+			return true;
+		}
 
 		msg.reply(
 			msg.friend.love >= 10 ? serifs.core.ote.love2 :

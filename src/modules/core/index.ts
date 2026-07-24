@@ -73,7 +73,10 @@ export default class extends Module {
 		// if (msg.text.startsWith('叫我')) return false;
 
 		// メッセージのみ
-		if (!msg.isDm) return true;
+		if (!msg.isDm) {
+			this.log(`Silent heart-only reply: setName() requires DM, user=${msg.userId} text="${msg.text.slice(0, 50)}"`);
+			return true;
+		}
 
 		if (msg.friend.love < 5) {
 			msg.reply(serifs.core.requireMoreLove);
