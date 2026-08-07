@@ -1,6 +1,8 @@
 import autobind from 'autobind-decorator';
 import Module from '@/module';
 import serifs from '@/serifs';
+import config from '@/config';
+import fixedTime from '@/utils/fixed-time';
 import { genMaze } from './gen-maze';
 import { renderMaze } from './render-maze';
 import Message from '@/message';
@@ -20,22 +22,27 @@ export default class extends Module {
 
 	@autobind
 	private async post() {
-		const now = new Date();
-		if (now.getHours() !== 22) return;
-		const date = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+		const time = fixedTime(config.mazePostTimezone || 'Asia/Shanghai');
+		if (time.hour !== (config.mazePostHour ?? 22)) return;
+
 		const data = this.getData();
-		if (data.lastPosted == date) return;
-		data.lastPosted = date;
+		if (data.lastPosted == time.date) return;
+
+		data.lastPosted = time.date;
 		this.setData(data);
 
 		this.log('Time to maze');
-		const file = await this.genMazeFile(date);
+		try {
+			const file = await this.genMazeFile(time.date);
 
-		this.log('Posting...');
-		this.ai.post({
-			text: serifs.maze.post,
-			fileIds: [file.id]
-		});
+			this.log('Posting...');
+			await this.ai.post({
+				text: serifs.maze.post,
+				fileIds: [file.id]
+			});
+		} catch (e) {
+			this.log(`Failed to post maze: ${e}`);
+		}
 	}
 
 	@autobind

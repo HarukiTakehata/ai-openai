@@ -11,17 +11,20 @@ export default class extends Module {
 	public install() {
 		if (!config.notingEnabled) return {};
 
+		const interval = (config.notingPostIntervalMinutes ?? 10) * 1000 * 60;
+		const probability = config.notingPostProbability ?? 0.04;
+
 		setInterval(() => {
-			if (Math.random() < 0.04) {
+			if (Math.random() < probability) {
 				this.post();
 			}
-		}, 1000 * 60 * 10);
+		}, interval);
 
 		return {};
 	}
 
 	@autobind
-	private post() {
+	private async post() {
 		const notes = [
 			...serifs.noting.notes,
 			() => {
@@ -42,8 +45,12 @@ export default class extends Module {
 
 		// TODO: 季節に応じたセリフ
 
-		this.ai.post({
-			text: typeof note === 'function' ? note() : note
-		});
+		try {
+			await this.ai.post({
+				text: typeof note === 'function' ? note() : note
+			});
+		} catch (e) {
+			this.log(`Failed to post noting note: ${e}`);
+		}
 	}
 }

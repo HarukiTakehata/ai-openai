@@ -31,6 +31,7 @@
 
 ### 迷路
 「迷路」と言うと迷路を描いてくれます。「難しい」「簡単」などの言葉を添えることで、難易度も調整できます。
+また、毎日 `mazePostHour`（既定 22 時）にその日の迷路を自動投稿します。発信時刻の判定には `mazePostTimezone`（既定 `Asia/Shanghai`）を使います。
 
 ### 数当てゲーム
 藍にメッセージで「数当てゲーム」と言うと遊べます。
@@ -93,7 +94,12 @@ PONGを返します。生存確認にどうぞ
 
 主要設定：`openaiEnabled` / `openaiApiKey` / `openaiBaseUrl` / `openaiModel` / `openaiSystemPrompt` / `openaiMaxTokens` / `openaiTemperature` / `openaiRateLimitPerMinute` / `openaiMaxConcurrentRequests` / `openaiDailyRequestLimit`
 
-`openaiEnabled` は明示的に `true` にした場合のみ有効です。ランダムトーク機能は現在実装されていません。
+`openaiEnabled` は明示的に `true` にした場合のみ有効です。
+
+### 自動投稿（noting / 毎日の迷路）
+- **ランダム投稿**：`notingEnabled: true` で有効。`notingPostIntervalMinutes`（分）ごとに `notingPostProbability` の確率で固定セリフを投稿します（既定は 15 分・0.02 ＝ 約 2 回/日）。
+- **毎日の迷路**：`mazePostTimezone` 時区の `mazePostHour` になると当日の迷路を自動投稿します。
+- 両機能とも**補発・再送はしません**。送信時刻を逃したり送信に失敗した場合、その日はスキップされます（`lastPosted` は送信前に記録されるため）。
 
 ### その他反応するフレーズ (トークのみ)
 * かわいい

@@ -7,6 +7,10 @@ type Config = {
 	keywordEnabled: boolean;
 	reversiEnabled: boolean;
 	notingEnabled: boolean;
+	notingPostIntervalMinutes?: number;
+	notingPostProbability?: number;
+	mazePostHour?: number;
+	mazePostTimezone?: string;
 	chartEnabled: boolean;
 	serverMonitoring: boolean;
 	mecab?: string;

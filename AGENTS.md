@@ -139,6 +139,18 @@ npx jest test/openai.ts --no-coverage  # 只跑 OpenAI 测试
 }
 ```
 
+noting/maze 模块字段：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `notingEnabled` | boolean | false | 启用随机固定台词模块 |
+| `notingPostIntervalMinutes` | number | 10 | noting 检查间隔（分钟） |
+| `notingPostProbability` | number | 0.04 | 每次检查触发发帖的概率（0~1） |
+| `mazePostHour` | number | 22 | 迷宫每日自动发送的小时（固定时区） |
+| `mazePostTimezone` | string | `Asia/Shanghai` | 迷宫发送判断所用 IANA 时区 |
+
+> 注意：noting 与 maze 的定时自动发送**无补发机制**——错过了 `mazePostHour` 或发送失败，当天即跳过，不会延迟/重发。`lastPosted` 在尝试发送前写入正是为了保证这一行为。
+
 OpenAI 模块字段：
 
 | 字段 | 类型 | 默认值 | 说明 |

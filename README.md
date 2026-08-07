@@ -43,6 +43,10 @@ docker-compose up
   "i": "Bot 账号的 Access Token",
   "master": "管理员用户名（可选）",
   "notingEnabled": true,
+  "notingPostIntervalMinutes": 15,
+  "notingPostProbability": 0.02,
+  "mazePostHour": 22,
+  "mazePostTimezone": "Asia/Shanghai",
   "keywordEnabled": false,
   "chartEnabled": false,
   "reversiEnabled": true,
@@ -66,6 +70,20 @@ docker-compose up
   "openaiDailyRequestLimit": 100
 }
 ```
+
+### noting / maze 配置项说明
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `notingEnabled` | boolean | false | 启用随机固定台词模块 |
+| `notingPostIntervalMinutes` | number | 10 | noting 检查间隔（分钟） |
+| `notingPostProbability` | number | 0.04 | 每次检查触发发帖的概率（0~1） |
+| `mazePostHour` | number | 22 | 迷宫每日自动发送的小时（固定时区） |
+| `mazePostTimezone` | string | `Asia/Shanghai` | 迷宫发送判断所用 IANA 时区 |
+
+noting 会按 `notingPostIntervalMinutes` 间隔、以 `notingPostProbability` 概率随机发送一条固定台词（示例配置约为 2 条/天）；maze 会在 `mazePostTimezone` 时区的 `mazePostHour` 点自动发布当日迷宫。
+
+> **两者均无补发机制**：错过发送时刻或发送失败，当天即跳过，不会延迟或重发。
 
 ### OpenAI 配置项说明
 
@@ -119,8 +137,10 @@ OpenAI 对话只接受独立命令 `openai`、`ai` 或 `chat`，例如 `@ai open
 ## 测试
 
 ```bash
-npm test                    # 全部测试
-npx jest test/openai.ts     # 仅 OpenAI 模块测试 (38 项)
+npm test                        # 全部测试
+npx jest test/openai.ts         # 仅 OpenAI 模块测试
+npx jest test/scheduled-posting.ts  # noting / maze 自动发送测试
+npx jest test/fixed-time.ts     # 时区工具测试
 ```
 
 ## 开源许可证
